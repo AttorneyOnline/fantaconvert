@@ -120,7 +120,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
                 elif lowercase == "custom.wav":
                     info["objection_override"]["custom"] = filename
                 info["files"].append(filename)
-                logger.debug(f"{filename}")
+                logger.debug(filename)
                 full_path = path.join(temp_char_dir, filename)
                 i = tar.gettarinfo(full_path, arcname=filename)
                 i.uid = i.gid = 0
