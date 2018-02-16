@@ -12,7 +12,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     logger.info("-- Conversion started for {}".format(path.basename(char_dir)))
     logger.debug("Reading char.ini")
     with open(path.join(char_dir, "char.ini")) as f:
-        char_ini = ConfigParser()
+        char_ini = ConfigParser(comment_prefixes=("#", ";", "//"), strict=False)
         char_ini.read_string(f.read())
     info = {
         "name": char_ini["Options"]["name"],
@@ -74,9 +74,12 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
             # Check if it is already on the list
             if preanim_name not in preanims:
                 preanim = {
-                    "anim": "{}.gif".format(preanim_name),
-                    "duration": int(char_ini["Time"][preanim_name]) * 60
+                    "anim": "{}.gif".format(preanim_name)
                 }
+                try:
+                    preanim["duration"] = int(char_ini["Time"][preanim_name]) * 60
+                except KeyError:
+                    pass
 
                 # Check if this emote has a sound effect, and add it to the preanim
                 sfx_name = char_ini["SoundN"][str(i)]
@@ -89,7 +92,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
                     }
 
                     # Copy sound effect
-                    logger.info("Copying sound effect {}".format(sfx_file))
+                    logger.debug("Copying sound effect {}".format(sfx_file))
                     shutil.copy2(path.join(base_dir, "sounds", "general", sfx_file),
                                  path.join(temp_char_dir, sfx_file))
 
