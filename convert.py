@@ -9,14 +9,13 @@ import tarfile
 logger = logging.getLogger()
 
 def convert(char_dir, base_dir, temp_dir, target_dir):
-    logger.info("Conversion started")
+    logger.info("-- Conversion started for {}".format(path.basename(char_dir)))
     logger.info("Reading char.ini")
     with open(path.join(char_dir, "char.ini")) as f:
         char_ini = ConfigParser()
         char_ini.read_string(f.read())
     info = {
-        # showname: AO2 only
-        "name": char_ini["Options"]["showname"] or char_ini["Options"]["name"],
+        "name": char_ini["Options"]["name"],
         "side": char_ini["Options"]["side"],
         # icon: Note that this may not work well with AO1.
         # AO1 uses DemoThings files which are buried in misc.
@@ -28,6 +27,12 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
         "files": []
     }
 
+    # Try to use friendly name instead of internal name (AO2)
+    try:
+        info["name"] = char_ini["Options"]["showname"]
+    except KeyError:
+        pass
+
     # Copy all files to temp dir
     logger.info("Copying original files")
     temp_char_dir = path.join(temp_dir, "content")
@@ -35,7 +40,11 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
 
     # Copy extra files
     logger.info("Copying blip sound effect")
-    blip_sfx = "sfx-blip" + char_ini["Options"]["gender"] + ".wav"
+    try:
+        blip_sfx = "sfx-blip" + char_ini["Options"]["gender"] + ".wav"
+    except KeyError:
+        # Sorry for assuming gender.. but there is no "generic" blip!
+        blip_sfx = "sfx-blipmale.wav"
     shutil.copy2(path.join(base_dir, "sounds", "general", blip_sfx),
                  path.join(temp_char_dir, "blip.wav"))
 
@@ -119,4 +128,4 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     logger.info("Copying files")
     shutil.copytree(temp_dir, path.join(target_dir, hash_str))
 
-    logger.info("Conversion complete!")
+    logger.info("-- Conversion complete!")

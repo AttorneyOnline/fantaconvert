@@ -11,10 +11,6 @@ make a standalone executable.
 
 - Only one set of button icons is used, since a selection effect is applied to
   the icon procedurally.
-- Explicit lengths and delays in emotes are lost because the format does not
-  support it.
-- Some AO1 assets use Windows-1252 or Windows-1251 (Cyrillic), so the encoding
-  must be inferred first and then converted to UTF-8.
 - Large GIFs ought to be converted to WebM first. This yields significant
   space savings.
 - Sound effects are extracted from the installation and placed on the asset.

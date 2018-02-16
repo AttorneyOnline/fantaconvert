@@ -30,7 +30,8 @@ class FantaConvertUI:
         builder.connect_callbacks({
             "browse_chardir": self.browse_chardir,
             "browse_basedir": self.browse_basedir,
-            "convert": self.start_convert
+            "convert": self.start_convert,
+            "convert_all": self.start_convert_all
         })
         logger.addHandler(LoggerWidget(builder.get_object("txt_log")))
         self.char_dir = ""
@@ -100,20 +101,43 @@ class FantaConvertUI:
 
         logger.info("Ready to convert.")
         self.builder.get_object("btn_convert").config(state=tk.NORMAL)
+        self.builder.get_object("btn_convert_all").config(state=tk.NORMAL)
         return True
 
     def start_convert(self):
         btn_convert = self.builder.get_object("btn_convert")
+        btn_convert_all = self.builder.get_object("btn_convert_all")
         btn_convert.config(state=tk.DISABLED)
+        btn_convert_all.config(state=tk.DISABLED)
         assets_dir = path.join(os.getcwd(), "assets")
         try:
             # Create temporary directory to work in containing our asset
             with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
                 convert(self.char_dir, self.base_dir, temp_dir, assets_dir)
         except Exception as e:
-            logger.error("A conversion error occurred!")
+            logger.error("-- A conversion error occurred!")
             logger.error(e, exc_info=True)
         btn_convert.config(state=tk.NORMAL)
+        btn_convert_all.config(state=tk.NORMAL)
+
+    def start_convert_all(self):
+        btn_convert = self.builder.get_object("btn_convert")
+        btn_convert_all = self.builder.get_object("btn_convert_all")
+        btn_convert.config(state=tk.DISABLED)
+        btn_convert_all.config(state=tk.DISABLED)
+        assets_dir = path.join(os.getcwd(), "assets")
+        chars_dir = path.dirname(self.char_dir)
+        for char_dir in os.listdir(chars_dir):
+            try:
+                # Create temporary directory to work in containing our asset
+                with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
+                    convert(path.join(chars_dir, char_dir),
+                            self.base_dir, temp_dir, assets_dir)
+            except Exception as e:
+                logger.error("-- A conversion error occurred!")
+                logger.error(e, exc_info=True)
+        btn_convert.config(state=tk.NORMAL)
+        btn_convert_all.config(state=tk.NORMAL)
 
 
 if __name__ == "__main__":
