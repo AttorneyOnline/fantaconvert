@@ -19,6 +19,7 @@ class LoggerWidget(logging.Handler):
 
     def emit(self, record):
         self.widget.insert(tk.INSERT, str(record.msg) + "\n")
+        self.widget.see(tk.END)
 
 
 class FantaConvertUI:

@@ -23,7 +23,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
         "icon": "char_icon.png",
         "blip": "blip.wav",
         "emotes": [],
-        "preanims": [],
+        "preanims": {},
         "objection_override": {},
         "files": []
     }
@@ -31,7 +31,6 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     # Copy all files to temp dir
     logger.info("Copying original files")
     temp_char_dir = path.join(temp_dir, "content")
-    os.mkdir(temp_char_dir)
     shutil.copytree(char_dir, temp_char_dir)
 
     # Copy extra files
@@ -42,15 +41,16 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
 
     logger.info("Converting emotes")
     preanims = info["preanims"]
-    for i in range(1, char_ini["Emotions"]["number"] + 1):
+    for i in range(1, int(char_ini["Emotions"]["number"]) + 1):
         emote_raw = char_ini["Emotions"][str(i)].split("#")
         emote = {
             "name": emote_raw[0],
             "icon": "emotions/button{}_on.png".format(i),
             "idle": "(a){}.gif".format(emote_raw[2]),
             "talking": "(b){}.gif".format(emote_raw[2]),
-            "zoom": emote_raw[3] == 5
         }
+        if emote_raw[3] == 5:
+            emote["zoom"] = True
         
         # Check if a preanim exists
         preanim_name = emote_raw[1]
@@ -60,8 +60,8 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
             # Check if it is already on the list
             if preanim_name not in preanims:
                 preanim = {
-                    "anim": "{}.gif".format(emote_raw[1]),
-                    "duration": char_ini["Time"][str(i)] * 60
+                    "anim": "{}.gif".format(preanim_name),
+                    "duration": int(char_ini["Time"][preanim_name]) * 60
                 }
 
                 # Check if this emote has a sound effect, and add it to the preanim
@@ -88,7 +88,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
             # Find some of the interjection WAV files.
             # Surprisingly enough, some characters use
             # capital letters in the filenames.
-            lowercase = filename.lowercase()
+            lowercase = filename.lower()
             if lowercase == "holdit.wav":
                 info["objection_override"]["hold_it"] = filename
             elif lowercase == "objection.wav":
@@ -102,15 +102,21 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     logger.info("Creating content.tar")
     shutil.make_archive(path.join(temp_dir, "content"), "tar",
                         root_dir=temp_char_dir, logger=logger)
+    
+    logger.info("Removing content folder")
+    shutil.rmtree(temp_char_dir)
 
     logger.info("Computing crc32 of content.tar")
     with open(path.join(temp_dir, "content.tar"), "rb") as f:
         hash = binascii.crc32(f.read())
-        info["hash"] = "crc32:{}".format(hash)
+        hash_str = "{:08x}".format(hash)
+        info["hash"] = "crc32:{}".format(hash_str)
 
     logger.info("Writing info.json")
     with open(path.join(temp_dir, "info.json"), "w") as f:
         json.dump(info, f)
 
     logger.info("Copying files")
-    shutil.copytree(temp_dir, path.join(target_dir, hash))
+    shutil.copytree(temp_dir, path.join(target_dir, hash_str))
+
+    logger.info("Conversion complete!")
