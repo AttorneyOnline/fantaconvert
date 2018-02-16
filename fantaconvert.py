@@ -1,6 +1,8 @@
+import os
 from os import path
 import logging
 from configparser import ConfigParser
+import tempfile
 
 import tkinter as tk
 from tkinter import filedialog
@@ -102,7 +104,14 @@ class FantaConvertUI:
     def start_convert(self):
         btn_convert = self.builder.get_object("btn_convert")
         btn_convert.config(state=tk.DISABLED)
-        convert(self.char_dir, self.base_dir)
+        assets_dir = path.join(os.getcwd(), "assets")
+        try:
+            # Create temporary directory to work in containing our asset
+            with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
+                convert(self.char_dir, self.base_dir, temp_dir, assets_dir)
+        except Exception as e:
+            logger.error("A conversion error occurred!")
+            logger.error(e, exc_info=True)
         btn_convert.config(state=tk.NORMAL)
 
 
