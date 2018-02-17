@@ -8,8 +8,10 @@ import shutil
 import tarfile
 logger = logging.getLogger()
 
-def convert(char_dir, base_dir, temp_dir, target_dir):
-    logger.info("-- Conversion started for {}".format(path.basename(char_dir)))
+def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
+    char_name = path.basename(char_dir)
+    logger.info("-- Conversion started for {}".format(char_name))
+    progress(5)
     logger.debug("Reading char.ini")
     with open(path.join(char_dir, "char.ini")) as f:
         char_ini = ConfigParser(comment_prefixes=("#", ";", "//"), strict=False)
@@ -35,11 +37,13 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
 
     # Copy all files to temp dir
     logger.debug("Copying original files")
+    progress(10)
     temp_char_dir = path.join(temp_dir, "content")
     shutil.copytree(char_dir, temp_char_dir)
 
     # Copy extra files
     logger.debug("Copying blip sound effect")
+    progress(25)
     try:
         blip_sfx = "sfx-blip" + char_ini["Options"]["gender"] + ".wav"
     except KeyError:
@@ -49,6 +53,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
                  path.join(temp_char_dir, "blip.wav"))
 
     logger.debug("Converting emotes")
+    progress(30)
     # Find case-insensitive emotions folder
     emotions_folder = [d for d in os.listdir(
         temp_char_dir) if d.lower() == "emotions"][0]
@@ -140,6 +145,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     #                     root_dir=temp_char_dir, logger=logger)
     
     logger.debug("Removing content folder")
+    progress(40)
     shutil.rmtree(temp_char_dir)
 
     with open(path.join(temp_dir, "content.tar"), "rb") as f:
@@ -149,10 +155,13 @@ def convert(char_dir, base_dir, temp_dir, target_dir):
     logger.info("CRC32: {}".format(hash_str))
 
     logger.debug("Writing info.json")
+    progress(55)
     with open(path.join(temp_dir, "info.json"), "w") as f:
         json.dump(info, f)
 
     logger.debug("Copying files")
+    progress(60)
     shutil.copytree(temp_dir, path.join(target_dir, hash_str))
 
-    logger.info("-- Conversion complete!")
+    logger.info("-- Conversion complete for {}".format(char_name))
+    progress(100)

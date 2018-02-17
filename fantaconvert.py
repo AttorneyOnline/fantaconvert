@@ -1,10 +1,17 @@
+import asyncio
+import concurrent
+import threading
+
 import os
 from os import path
+
 import logging
-from configparser import ConfigParser
+
+import heapq
 import tempfile
 
 import tkinter as tk
+import tkinter.ttk as ttk
 from tkinter import filedialog
 import pygubu
 
@@ -23,7 +30,8 @@ class LoggerWidget(logging.Handler):
 
 
 class FantaConvertUI:
-    def __init__(self):
+    def __init__(self, loop):
+        self.loop = loop
         self.builder = builder = pygubu.Builder()
         builder.add_from_file("fantaconvert.ui")
         self.main_window = builder.get_object("Toplevel")
@@ -31,11 +39,14 @@ class FantaConvertUI:
             "browse_chardir": self.browse_chardir,
             "browse_basedir": self.browse_basedir,
             "convert": self.start_convert,
-            "convert_all": self.start_convert_all
+            "convert_all": self.start_convert_all,
+            "cancel": self.cancel_convert
         })
         logger.addHandler(LoggerWidget(builder.get_object("txt_log")))
         self.char_dir = ""
         self.base_dir = ""
+        self.assets_dir = path.join(os.getcwd(), "assets")
+        self.tasks = None
 
     def run(self):
         self.main_window.mainloop()
@@ -91,10 +102,8 @@ class FantaConvertUI:
             return False
         try:
             with open(path.join(self.char_dir, "char.ini")) as f:
-                char_ini = ConfigParser()
-                char_ini.read_string(f.read())
                 logger.info("Found char.ini for character {}.".format(
-                    char_ini["Options"]["name"]))
+                    path.basename(self.char_dir)))
         except (OSError, KeyError) as e:
             logger.error(e)
             return False
@@ -104,43 +113,102 @@ class FantaConvertUI:
         self.builder.get_object("btn_convert_all").config(state=tk.NORMAL)
         return True
 
-    def start_convert(self):
+    def enable_buttons(self):
+        btn_convert = self.builder.get_object("btn_convert")
+        btn_convert_all = self.builder.get_object("btn_convert_all")
+        btn_convert.config(state=tk.NORMAL)
+        btn_convert_all.config(state=tk.NORMAL)
+
+    def disable_buttons(self):
         btn_convert = self.builder.get_object("btn_convert")
         btn_convert_all = self.builder.get_object("btn_convert_all")
         btn_convert.config(state=tk.DISABLED)
         btn_convert_all.config(state=tk.DISABLED)
-        assets_dir = path.join(os.getcwd(), "assets")
-        try:
-            # Create temporary directory to work in containing our asset
-            with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
-                convert(self.char_dir, self.base_dir, temp_dir, assets_dir)
-        except Exception as e:
-            logger.error("-- A conversion error occurred!")
-            logger.error(e, exc_info=True)
-        btn_convert.config(state=tk.NORMAL)
-        btn_convert_all.config(state=tk.NORMAL)
+
+    def start_convert(self):
+        self.disable_buttons()
+        self.show_progress()
+        def do_convert():
+            self.convert_character(self.char_dir)
+            self.hide_progress()
+            self.enable_buttons()
+        threading.Thread(target=do_convert).start()
+
+    def show_progress(self):
+        self.progress = progress = ttk.Labelframe(self.main_window)
+        progress["text"] = "Progress"
+        progress.grid(row=7, column=0, sticky=tk.EW, columnspan=2)
+        progress.grid_columnconfigure(0, weight=1, pad=4)
+        self.progress_bars = []
+        # Heap of rows. The unused lowest row is always used.
+        self.progress_bar_rows = [x for x in range(1, 4)]
+        heapq.heapify(self.progress_bar_rows)
+
+    def hide_progress(self):
+        self.progress.grid_remove()
+        del self.progress
+        del self.progress_bars
+
+    def add_progress_bar(self):
+        progress_bar = ttk.Progressbar(self.progress)
+        row = heapq.heappop(self.progress_bar_rows)
+        progress_bar.grid(row=row, column=0, sticky=tk.EW)
+        progress_bar.row = row
+        self.progress_bars.append(progress_bar)
+        return progress_bar
+
+    def remove_progress_bar(self, progress_bar):
+        heapq.heappush(self.progress_bar_rows, progress_bar.row)
+        progress_bar.grid_remove()
+        self.progress_bars.remove(progress_bar)
+
+    def cancel_convert(self):
+        self.builder.get_object("btn_cancel").config(state=tk.DISABLED)
+        if self.tasks is not None:
+            self.tasks.cancel()
 
     def start_convert_all(self):
-        btn_convert = self.builder.get_object("btn_convert")
-        btn_convert_all = self.builder.get_object("btn_convert_all")
-        btn_convert.config(state=tk.DISABLED)
-        btn_convert_all.config(state=tk.DISABLED)
-        assets_dir = path.join(os.getcwd(), "assets")
+        self.disable_buttons()
+        self.builder.get_object("btn_cancel").config(state=tk.NORMAL)
+        self.show_progress()
         chars_dir = path.dirname(self.char_dir)
-        for char_dir in os.listdir(chars_dir):
-            try:
-                # Create temporary directory to work in containing our asset
-                with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
-                    convert(path.join(chars_dir, char_dir),
-                            self.base_dir, temp_dir, assets_dir)
-            except Exception as e:
-                logger.error("-- A conversion error occurred!")
-                logger.error(e, exc_info=True)
-        btn_convert.config(state=tk.NORMAL)
-        btn_convert_all.config(state=tk.NORMAL)
+        def do_convert_all():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                tasks = [
+                    self.loop.run_in_executor(
+                        executor, self.convert_character, path.join(chars_dir, char_dir))
+                    for char_dir in os.listdir(chars_dir)
+                ]
+                print(tasks)
+                self.tasks = asyncio.gather(*tasks)
+                try:
+                    self.loop.run_until_complete(self.tasks)
+                except concurrent.futures.CancelledError:
+                    logger.warn("Canceling!")
+            self.enable_buttons()
+            self.builder.get_object("btn_cancel").config(state=tk.DISABLED)
+            self.hide_progress()
+        threading.Thread(target=do_convert_all).start()
 
+    def convert_character(self, char_dir):
+        progress = self.add_progress_bar()
+        try:
+            def set_progress(x):
+                progress["value"] = x
+
+            # Create temporary directory to work in containing our asset
+            with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
+                convert(char_dir, self.base_dir, temp_dir,
+                        self.assets_dir, progress=set_progress)
+        except Exception as e:
+            logger.error(
+                "-- A conversion error occurred for {}".format(path.basename(char_dir)))
+            logger.error(e, exc_info=True)
+        finally:
+            self.remove_progress_bar(progress)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    app = FantaConvertUI()
+    loop = asyncio.get_event_loop()
+    app = FantaConvertUI(loop)
     app.run()
