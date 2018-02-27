@@ -1,14 +1,14 @@
 import os
 from os import path
 from configparser import ConfigParser
-import binascii
+import hashlib
 import json
 import logging
 import shutil
-import tarfile
+import zipfile
 logger = logging.getLogger()
 
-def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
+def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None, strip=False):
     char_name = path.basename(char_dir)
     logger.info("-- Conversion started for {}".format(char_name))
     progress(5)
@@ -36,27 +36,54 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
         pass
 
     # Copy all files to temp dir
-    logger.debug("Copying original files")
+    logger.debug("Scanning original files")
     progress(10)
-    temp_char_dir = path.join(temp_dir, "content")
-    shutil.copytree(char_dir, temp_char_dir)
+
+    for root, dirs, files in os.walk(char_dir):
+        for name in files:
+            full_path = path.join(root, name)
+            if not path.isfile(full_path):
+                continue
+
+            filename = path.join(path.relpath(root, char_dir), name)
+            filename = filename.replace("\\", "/")
+
+            # KILL THE DOT FOLDER WITH FIRE
+            if filename[:2] == "./":
+                filename = filename[2:]
+
+            # Find some of the interjection WAV files.
+            # Surprisingly enough, some characters use
+            # capital letters in the filenames.
+            lowercase = filename.lower()
+            if lowercase == "holdit.wav":
+                info["objection_override"]["hold_it"] = filename
+            elif lowercase == "objection.wav":
+                info["objection_override"]["objection"] = filename
+            elif lowercase == "takethat.wav":
+                info["objection_override"]["take_that"] = filename
+            elif lowercase == "custom.wav":
+                info["objection_override"]["custom"] = filename
+            info["files"].append(filename)
+            logger.debug(filename)
 
     # Copy extra files
-    logger.debug("Copying blip sound effect")
-    progress(25)
+    # extra_files: array of tuples containing filename and source path
+    extra_files = []
+    logger.debug("Getting blip sound effect")
+    progress(18)
     try:
         blip_sfx = "sfx-blip" + char_ini["Options"]["gender"] + ".wav"
     except KeyError:
         # Sorry for assuming gender.. but there is no "generic" blip!
         blip_sfx = "sfx-blipmale.wav"
-    shutil.copy2(path.join(base_dir, "sounds", "general", blip_sfx),
-                 path.join(temp_char_dir, "blip.wav"))
+    extra_files.append(("blip.wav", path.join(base_dir, "sounds", "general", blip_sfx)))
 
     logger.debug("Converting emotes")
-    progress(30)
+    progress(20)
     # Find case-insensitive emotions folder
     emotions_folder = [d for d in os.listdir(
-        temp_char_dir) if d.lower() == "emotions"][0]
+        char_dir) if d.lower() == "emotions"][0]
 
     # Go through all emotes and find preanimations
     preanims = info["preanims"]
@@ -65,6 +92,8 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
         emote = {
             "name": emote_raw[0],
             "icon": "{}/button{}_on.png".format(emotions_folder, i),
+            # This also covers the case where the (a) and (b) emotes are
+            # placed in different folders using the `/` trick.
             "idle": "(a){}.gif".format(emote_raw[2]),
             "talking": "(b){}.gif".format(emote_raw[2]),
         }
@@ -98,70 +127,53 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
 
                     # Copy sound effect
                     logger.debug("Copying sound effect {}".format(sfx_file))
-                    shutil.copy2(path.join(base_dir, "sounds", "general", sfx_file),
-                                 path.join(temp_char_dir, sfx_file))
+                    extra_files.append((sfx_file, path.join(base_dir, "sounds", "general", sfx_file)))
 
                 preanims[preanim_name] = preanim
         info["emotes"].append(emote)
 
-    logger.debug("Scanning files and creating content.tar")
-    with tarfile.open(path.join(temp_dir, "content.tar"), "w") as tar:
-        for root, dirs, files in os.walk(temp_char_dir):
-            for name in files:
-                filename = path.join(path.relpath(root, temp_char_dir), name)
-                filename.replace("\\", "/")
-
-                # KILL THE DOT FOLDER WITH FIRE
-                if filename[:2] == "./":
-                    filename = filename[2:]
-
-                # Find some of the interjection WAV files.
-                # Surprisingly enough, some characters use
-                # capital letters in the filenames.
-                lowercase = filename.lower()
-                if lowercase == "holdit.wav":
-                    info["objection_override"]["hold_it"] = filename
-                elif lowercase == "objection.wav":
-                    info["objection_override"]["objection"] = filename
-                elif lowercase == "takethat.wav":
-                    info["objection_override"]["take_that"] = filename
-                elif lowercase == "custom.wav":
-                    info["objection_override"]["custom"] = filename
-                info["files"].append(filename)
-                logger.debug(filename)
-                full_path = path.join(temp_char_dir, filename)
-                i = tar.gettarinfo(full_path, arcname=filename)
-                i.uid = i.gid = 0
-                i.uname = i.gname = ""
-                if i.isreg():
-                    with open(full_path, "rb") as f:
-                        tar.addfile(i, fileobj=f)
-                else:
-                    tar.addfile(i)
-
-    #with tarfile.open(path.join(temp_dir, "content.tar"), "w") as tar:
-    #    tar.add(temp_char_dir, arcname=path.sep)
-    # shutil.make_archive(path.join(temp_dir, "content"), "tar",
-    #                     root_dir=temp_char_dir, logger=logger)
-    
-    logger.debug("Removing content folder")
-    progress(40)
-    shutil.rmtree(temp_char_dir)
-
-    with open(path.join(temp_dir, "content.tar"), "rb") as f:
-        hash = binascii.crc32(f.read())
-        hash_str = "{:08x}".format(hash)
-        info["hash"] = "crc32:{}".format(hash_str)
-    logger.info("CRC32: {}".format(hash_str))
-
     logger.debug("Writing info.json")
-    progress(55)
-    with open(path.join(temp_dir, "info.json"), "w") as f:
+    progress(25)
+
+    info_path = path.join(temp_dir, "info.json")
+    extra_files.append(("info.json", info_path))
+
+    # Finalize file list
+    all_files = [(f, path.join(char_dir, f)) for f in info["files"]]
+    for fp in extra_files:
+        info["files"].append(fp[0])
+        all_files.append(fp)
+    all_files = set(all_files)
+
+    with open(info_path, "w") as f:
         json.dump(info, f)
 
+    logger.debug("Scanning files and creating content archive")
+    progress(30)
+    zip_path = path.join(temp_dir, "content.zip")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.comment = b"Auto-generated by fantaconvert"
+        cur_progress, max_progress = 0, len(all_files)
+        for filename, full_path in all_files:
+            with open(full_path, "rb") as f:
+                archive.write(full_path, arcname=filename)
+            cur_progress += 1
+            progress(int(30 + (cur_progress / max_progress) * 55))
+
+    logger.debug("Calculating hash")
+    progress(85)
+
+    with open(zip_path, "rb") as f:
+        hash = hashlib.sha1()
+        hash.update(f.read())
+        hash_str = hash.hexdigest()
+    logger.info("SHA-1: {}".format(hash_str))
+    os.rename(zip_path, path.join(temp_dir, hash_str + ".zip"))
+    zip_path = path.join(temp_dir, hash_str + ".zip")
+
     logger.debug("Copying files")
-    progress(60)
-    shutil.copytree(temp_dir, path.join(target_dir, hash_str))
+    progress(95)
+    shutil.move(zip_path, target_dir)
 
     logger.info("-- Conversion complete for {}".format(char_name))
     progress(100)
