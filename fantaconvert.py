@@ -179,7 +179,6 @@ class FantaConvertUI:
                         executor, self.convert_character, path.join(chars_dir, char_dir))
                     for char_dir in os.listdir(chars_dir)
                 ]
-                print(tasks)
                 self.tasks = asyncio.gather(*tasks)
                 try:
                     self.loop.run_until_complete(self.tasks)
