@@ -15,7 +15,7 @@ import tkinter.ttk as ttk
 from tkinter import filedialog
 import pygubu
 
-from convert import convert
+from convert import convert_char
 
 logger = logging.getLogger()
 
@@ -46,7 +46,29 @@ class FantaConvertUI:
         self.char_dir = ""
         self.base_dir = ""
         self.assets_dir = path.join(os.getcwd(), "assets")
+        self.author_info = None
         self.tasks = None
+        self.load_author_info()
+
+    def load_author_info(self):
+        from configparser import ConfigParser
+        self.author_info = ConfigParser()
+        try:
+            with open("author.ini") as f:
+                self.author_info.read_file(f)
+        except FileNotFoundError:
+            self.author_info.add_section("author")
+            self.author_info["author"]["name"] = ""
+            self.author_info["author"]["url"] = ""
+            with open("author.ini", "w") as f:
+                self.author_info.write(f, space_around_delimiters=False)
+        if self.author_info["author"]["name"] == "":
+            logger.warning(
+                "Author information is empty. You may wish to edit " +
+                "author.ini and restart.")
+            self.author_info = None
+        else:
+            self.author_info = dict(self.author_info["author"])
 
     def run(self):
         self.main_window.mainloop()
@@ -197,8 +219,9 @@ class FantaConvertUI:
 
             # Create temporary directory to work in containing our asset
             with tempfile.TemporaryDirectory(prefix="fantaconvert") as temp_dir:
-                convert(char_dir, self.base_dir, temp_dir,
-                        self.assets_dir, progress=set_progress)
+                convert_char(char_dir, self.base_dir, temp_dir,
+                             self.assets_dir, progress=set_progress,
+                             author=self.author_info)
         except Exception as e:
             logger.error(
                 "-- A conversion error occurred for {}".format(path.basename(char_dir)))

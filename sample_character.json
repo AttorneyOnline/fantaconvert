@@ -1,0 +1,71 @@
+{
+  "name": "Adachi",
+  "category": "character",
+  "_category_options": [
+    "audio",
+    "background",
+    "character",
+    "evidence",
+    "meta"
+  ],
+  "parent": "optional",
+  "chatbox_name": "optional",
+  "meta": {
+    "author": {
+      "name": "required if author field is included",
+      "url": "optional"
+    },
+    "desc": "optional",
+    "source": "[wikidata]",
+    "date": "ISO-8601"
+  },
+  "side": "pro",
+  "_side_options": [
+    ["wit", "Witness"],
+    ["def", "Defense"],
+    ["pro", "Prosection"], 
+    ["jud", "Judge"],
+    ["hld", "Helper defense"],
+    ["hlp", "Helper prosecution"]
+  ],
+  "icon": "char_icon.png",
+  "blip": "blip.wav",
+  "_blip_comment": "extracted from base installation",
+  "emotes": [
+    {
+      "name": "Coat On",
+      "icon": "emotions/button1_on.png",
+      "idle": "(a)normal.gif",
+      "talking": "(b)normal.gif",
+      "zoom": true,
+      "_zoom_comment": "not present if false"
+    }
+  ],
+  "preanims": {
+    "coat": {
+      "anim": "precoat.gif",
+      "duration": 60,
+      "sfx": {
+        "file": "cool.wav",
+        "delay": 60
+      }
+    }
+  },
+  "interjections": [
+    {
+      "name": "Hold it!",
+      "sound": "holdit.wav",
+      "anim": "holdit.gif"
+    },
+    {
+      "name": "Objection!",
+      "sound": "objection.wav",
+      "anim": "objection.gif"
+    },
+    {
+      "name": "Take that!",
+      "sound": "takethat.wav",
+      "anim": "takethat.gif"
+    }
+  ]
+}

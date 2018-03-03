@@ -1,6 +1,7 @@
 import os
 from os import path
 from configparser import ConfigParser
+import datetime
 import hashlib
 import json
 import logging
@@ -8,7 +9,18 @@ import shutil
 import zipfile
 logger = logging.getLogger()
 
-def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
+
+def convert_char(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None,
+                 standard_base_file="standard_base.json", author=None):
+    """
+    Convert an AO1 character to a JSON-based format.
+
+    :param char_dir: the directory where char.ini resides
+    :param base_dir: the directory where the AO installation folder resides
+    :param temp_dir: a directory that may be used for temporary usage
+    :param target_dir: the directory where the contents of temp_dir will be copied to
+    :param progress: a function that reports progress to a UI
+    """
     char_name = path.basename(char_dir)
     logger.debug("-- Conversion started for {}".format(char_name))
     progress(5)
@@ -24,17 +36,33 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
         if section not in char_ini and section_lower in char_ini:
             char_ini[section] = char_ini[section_lower]
 
+    # Load in the standard base manifest.
+    # This will help us determine if we need to copy in the sfx or not.
+    # This manifest is special because it lists out the files
+    # and their hashes, whereas normal manifests do not have this listing.
+    with open(standard_base_file) as f:
+        standard_base = json.load(f)
+
+    # Contains a dictionary of files mapped to their SHA-1 hashes
+    parent_files = standard_base["files"]
+
+    files_list = []
     info = {
+        "parent": standard_base["id"],
         "name": char_ini["Options"]["name"],
+        "category": "character",
+        "meta": {
+            "author": author,
+            "desc": "Imported using fantaconvert",
+            "date": datetime.datetime.utcnow().astimezone().isoformat()
+        },
         "side": char_ini["Options"]["side"],
         # icon: Note that this may not work well with AO1.
         # AO1 uses DemoThings files which are buried in misc.
         "icon": "char_icon.png",
-        "blip": "blip.wav",
         "emotes": [],
         "preanims": {},
-        "objection_override": {},
-        "files": []
+        "interjections": []
     }
 
     # Try to use friendly name instead of internal name (AO2)
@@ -47,6 +75,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
     logger.debug("Scanning original files")
     progress(10)
 
+    # Scan all files
     for root, _dirs, files in os.walk(char_dir):
         for name in files:
             full_path = path.join(root, name)
@@ -60,24 +89,41 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
             if filename[:2] == "./":
                 filename = filename[2:]
 
-            # Find some of the interjection WAV files.
-            # Surprisingly enough, some characters use
-            # capital letters in the filenames.
-            lowercase = filename.lower()
-            if lowercase == "holdit.wav":
-                info["objection_override"]["hold_it"] = filename
-            elif lowercase == "objection.wav":
-                info["objection_override"]["objection"] = filename
-            elif lowercase == "takethat.wav":
-                info["objection_override"]["take_that"] = filename
-            elif lowercase == "custom.wav":
-                info["objection_override"]["custom"] = filename
-            info["files"].append(filename)
+            files_list.append(filename)
             logger.debug(filename)
+
+    # Find some of the interjection WAV files.
+    # Surprisingly enough, some characters use
+    # capital letters in the filenames.
+    files_insensitive = {x.lower(): x for x in files_list}
+    interjections = [
+        ("holdit", "Hold it!"),
+        ("objection", "Objection!"),
+        ("takethat", "Take that!"),
+        ("custom", "Custom")
+    ]
+    for f, n in interjections:
+        wav = f + ".wav"
+        if wav in files_insensitive:
+            info["interjections"].append({
+                "name": n,
+                "sound": files_insensitive[wav],
+                "anim": (f + ".gif", f + "_bubble.gif")
+                        [f + "_bubble.gif" in files_insensitive]
+            })
+            # Do not copy interjection sound if it is the generic one found
+            # in the standard base
+            if wav in parent_files:
+                with open(path.join(char_dir, wav), "rb") as sound:
+                    file_hash = hashlib.sha1()
+                    file_hash.update(sound.read())
+                if file_hash.hexdigest() == parent_files[wav]:
+                    files_list.remove(wav)
 
     # Copy extra files
     # extra_files: array of tuples containing filename and source path
     extra_files = []
+
     logger.debug("Getting blip sound effect")
     progress(18)
     try:
@@ -85,7 +131,27 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
     except KeyError:
         # Sorry for assuming gender.. but there is no "generic" blip!
         blip_sfx = "sfx-blipmale.wav"
-    extra_files.append(("blip.wav", path.join(base_dir, "sounds", "general", blip_sfx)))
+    
+    # Case 1: file exists in character folder.
+    #   Do nothing - it will be copied in (I won't bother checking the hash)
+    # Case 2: file exists in parent (standard base).
+    #   Do nothing - it does not need to be copied
+    #   (Here, though, I'll add a prefix to keep things tidy)
+    # Case 3: file does not exist in parent (standard base) or in character folder
+    #   Copy it in - if it doesn't exist in installation folder,
+    #   we expect an error to occur
+    def add_sfx(sfx_file):
+        if sfx_file in files_list:
+            pass
+        elif "sfx/" + sfx_file in parent_files:
+            sfx_file = "sfx/" + sfx_file
+        else:
+            extra_files.append(
+                (sfx_file, path.join(base_dir, "sounds", "general", sfx_file))
+            )
+        return sfx_file
+
+    info["blip"] = add_sfx(blip_sfx)
 
     logger.debug("Converting emotes")
     progress(20)
@@ -117,7 +183,7 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
         if preanim_name not in ("-", "normal"):
             emote["talking_preanim"] = preanim_name
 
-            # Check if it is already on the list
+            # Check if preanim is already on the list
             if preanim_name not in preanims:
                 preanim = {
                     "anim": "{}.gif".format(preanim_name)
@@ -136,21 +202,20 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
                     sfx_name = ""
 
                 if len(sfx_name) > 1:
-                    sfx_file = "{}.wav".format(sfx_name)
+                    sfx_file = add_sfx("{}.wav".format(sfx_name))
                     preanim["sfx"] = {
                         "file": sfx_file
                     }
-                    # 1 tick = 60 ms
                     try:
+                        # 1 tick = 60 ms
                         preanim["sfx"]["delay"] = int(char_ini["SoundT"][str(i)]) * 60
-                    except:
+                    except KeyError:
                         logger.warning("{}: char.ini warning: could not find SoundT for emote #{}"
                                        .format(char_name, i))
                         preanim["sfx"]["delay"] = 0
 
                     # Copy sound effect
                     logger.debug("Copying sound effect {}".format(sfx_file))
-                    extra_files.append((sfx_file, path.join(base_dir, "sounds", "general", sfx_file)))
 
                 preanims[preanim_name] = preanim
         info["emotes"].append(emote)
@@ -162,9 +227,9 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
     extra_files.append(("info.json", info_path))
 
     # Finalize file list
-    all_files = [(f, path.join(char_dir, f)) for f in info["files"]]
+    all_files = [(f, path.join(char_dir, f)) for f in files_list]
     for fp in extra_files:
-        info["files"].append(fp[0])
+        files_list.append(fp[0])
         all_files.append(fp)
     all_files = set(all_files)
 
@@ -174,16 +239,13 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
     logger.debug("Hashing files and creating content archive")
     progress(30)
 
-    hashes = []
     zip_path = path.join(temp_dir, "content.zip")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.comment = b"Auto-generated by fantaconvert"
         cur_progress, max_progress = 0, len(all_files)
         for filename, full_path in all_files:
             with open(full_path, "rb") as f:
-                file_hash = hashlib.sha1()
-                file_hash.update(f.read())
-                hashes.append(file_hash.digest())
+                pass
             archive.write(full_path, arcname=filename)
             cur_progress += 1
             progress(int(30 + (cur_progress / max_progress) * 55))
@@ -191,12 +253,9 @@ def convert(char_dir, base_dir, temp_dir, target_dir, progress=lambda x: None):
     logger.debug("Calculating canonical hash")
     progress(85)
 
-    # The canonical hash is the SHA-1 of all of the files' SHA-1 hashes in
-    # ascending order.
     final_hash = hashlib.sha1()
-    hashes.sort()
-    for file_hash in hashes:
-        final_hash.update(file_hash)
+    with open(zip_path, "rb") as f:
+        final_hash.update(f.read())
     hash_str = final_hash.hexdigest()
 
     os.rename(zip_path, path.join(temp_dir, hash_str + ".zip"))
